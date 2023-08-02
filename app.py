@@ -1,0 +1,210 @@
+import threading
+import tkinter as tk
+from tkinter import ttk
+import requests
+import bs4 
+import json
+import time
+
+#Setting up tkinter
+root = tk.Tk()
+root.title('IMDb and JustWatch scraper')
+root.geometry("900x900")
+root.resizable(False, False)
+
+#Function to start a second thread, so the app won't freeze up while processing
+def button_thread():
+    button.config(text="Checking, please wait...",state="disable")
+    
+    progressbar.pack(fill="x")
+    progressbar['value'] = 0
+    x = threading.Thread(target=check_shows)
+    x.start()
+
+#Main function
+#Very sloppy. Could be better.
+def check_shows():
+    c = str({country.get()}).removeprefix("{'").removesuffix("'}")
+    user_id = str({username.get()}).removeprefix("{'").removesuffix("'}")
+
+    url = 'https://www.imdb.com/user/'+user_id+'/watchlist?sort=alpha%2Casc&view=detail' 
+
+    res = requests.get(url,headers={'Accept-Language':'en','User-Agent': 'python-requests/2.31.0', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive'}) 
+    soup = bs4.BeautifulSoup(res.text, "html.parser") 
+    js_elements = soup.find_all('script')
+    js_text = None
+    search_str = 'IMDbReactInitialState.push('
+
+    for element in js_elements:
+        text = element.text
+        if search_str in text:
+            js_text = text.strip()
+            break
+
+    json_start = js_text.index(search_str) + len(search_str)
+    json_text = js_text[json_start:-2]
+    json_obj = json.loads(js_text[json_start:-2])
+    titles = []
+    for title in json_obj['titles']:
+        json_title = json_obj['titles'][title]
+        list.append(titles,json_title['primary']['title'])
+
+    #Running the same thing again because imdb only show 100 titles at once.
+    if len(titles) == 100:
+        url = 'https://www.imdb.com/user/'+user_id+'/watchlist?sort=alpha%2Cdesc&view=detail'
+        #This header should fetch the titles in english, and not the language of the country
+        res = requests.get(url,headers={'Accept-Language':'en','User-Agent': 'python-requests/2.31.0', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive'}) 
+        soup = bs4.BeautifulSoup(res.text, "html.parser") 
+        js_elements = soup.find_all('script')
+        js_text = None
+        search_str = 'IMDbReactInitialState.push('
+
+        for element in js_elements:
+            text = element.text
+            if search_str in text:
+                js_text = text.strip()
+                break
+
+        json_start = js_text.index(search_str) + len(search_str)
+        json_text = js_text[json_start:-2]
+        json_obj = json.loads(js_text[json_start:-2])
+
+        for title in json_obj['titles']:
+            json_title = json_obj['titles'][title]
+            list.append(titles,json_title['primary']['title'])
+
+    #Ran the thing at least once, maybe twice. If the watchlist has more than 200 titles, no more than 200 will show up currently.
+    titles = list(dict.fromkeys(titles))
+    
+    #JustWatch part
+    movie = 'https://www.justwatch.com/'+c+'/movie/'
+    show = 'https://www.justwatch.com/'+c+'/tv-series/'
+    just = ""
+    found = {}
+    not_found = []
+    no_streams = []
+
+    
+    l = 99.999/len(titles)
+    mins = (len(titles)/60)*2
+    if len(titles) >= 200:
+        time_label.config(text="Found "+str(len(titles))+" titles in watchlist.\nWARNING! The app can not handle more than 200 titles at this point.\nTime to complete:\nRoughly "+str(mins)+" minutes.")    
+    time_label.config(text="Found "+str(len(titles))+" titles in watchlist.\nTime to complete:\nRoughly "+str(mins)+" minutes.")
+    
+    #Going through each title in the list. Adding in pauses so JustWatch won't deny the requests
+    for title in titles:
+        progressbar.step(l) 
+        n_title = (str(str(title.replace(" ","-")).lower()).replace("'","")).replace(".","")
+        shows = requests.get(show+n_title)
+        time.sleep(1)
+        movies = requests.get(movie+n_title)
+        just = 'Not Found'
+        if movies.status_code != 404:
+            just = movie+n_title
+        if shows.status_code != 404 and just == "Not Found":
+            just = show+n_title
+        time.sleep(1)
+
+        #Title was found on JustWatch. Gathering which streaming platforms each title can be viewed on.
+        if just != 'Not Found':
+            url=just
+            
+            try:
+                res = requests.get(url) 
+            except Exception as e:
+                print(e)
+            soup = bs4.BeautifulSoup(res.text, "html.parser") 
+            sc = soup.find_all('div', attrs={'class':'buybox-row'})
+            streams = 0
+            platforms = []
+            for div in sc:
+                for label in div.find_all('label'):
+                        if label.text == 'Stream':
+                            streams = div
+                            break
+            
+            if streams != 0:
+                for a in streams:
+                    for img in a.find_all("img"):
+                        platforms.append(img['alt'])
+                found[title]=platforms
+            else:
+                no_streams.append(title)
+        else:
+            not_found.append(title)
+    
+    view_text_1 = ""
+    view_text_2 = ""
+    view_text_3 = ""
+    for entry in found:
+        view_text_1 = view_text_1 + entry + "\n" +str(found[entry]) + "\n" + "---" + "\n"
+    for entry in no_streams:
+        view_text_2 = view_text_2 + entry  + "\n" + "---" + "\n"
+    for entry in not_found:
+        view_text_3 = view_text_3 + entry  + "\n" + "---" + "\n"
+
+    #Setting tkinter stuff. enabling the button.
+    view_1.insert(tk.INSERT,view_text_1)
+    view_2.insert(tk.INSERT,view_text_2)
+    view_3.insert(tk.INSERT,view_text_3)
+    progressbar['value'] = 100
+    button.config(text="Check movies and shows",state="enable")
+    time_label.config(text="")
+
+
+#The tkinter window
+country = tk.StringVar()
+username = tk.StringVar()
+button_frame = ttk.Frame(root)
+
+#Box for country code, username and confirm button
+country_label = ttk.Label(button_frame, text="Enter your country code below:\n Examples: \n NO = Norway \n US = USA \n SE = Sweden")
+country_label.pack(fill='x', expand=True)
+country_entry = ttk.Entry(button_frame, textvariable=country)
+country_entry.pack(fill='x', expand=True)
+country_entry.focus()
+user_label = ttk.Label(button_frame, text="Enter your IMDB username:\n(Usually begins with 'ur')")
+user_label.pack(fill='x', expand=True)
+user_entry = ttk.Entry(button_frame, textvariable=username)
+user_entry.pack(fill='x', expand=True)
+button = ttk.Button(button_frame, text="Check movies and shows", command=button_thread)
+button.pack(fill='x', expand=True, pady=10)
+
+#label used for telling how long the checkings will take
+time_label = ttk.Label(button_frame,text="")
+time_label.pack(fill='x', expand=True)
+
+
+progressbar = ttk.Progressbar(button_frame, maximum=100)
+button_frame.pack(padx=10, pady=0)
+
+#The 3 text boxes that will be populated with movies etc.
+frame = ttk.Frame(root)
+text= ttk.Label(frame, text= "Movies and shows with streaming options:")
+text.pack(pady=10)
+
+scroll_1=ttk.Scrollbar(frame,orient="vertical")
+scroll_1.pack(side="right",fill="y")
+view_1 = tk.Text(frame,yscrollcommand=scroll_1.set, height=7)
+view_1.pack(pady=10)
+frame.pack()
+
+frame_2 = ttk.Frame(root)
+text= ttk.Label(frame_2, text= "Movies and shows not found on any streaming platforms:")
+text.pack(pady=10)
+scroll_2=ttk.Scrollbar(frame_2,orient="vertical")
+scroll_2.pack(side="right",fill="y")
+view_2 = tk.Text(frame_2,yscrollcommand=scroll_2.set, height=7)
+view_2.pack(pady=10)
+frame_2.pack()
+
+frame_3 = ttk.Frame(root)
+text= ttk.Label(frame_3, text= "Movies and shows not found on JustWatch:\n(Foreign title names might cause issues.)")
+text.pack(pady=10)
+scroll_3=ttk.Scrollbar(frame_3,orient="vertical")
+scroll_3.pack(side="right",fill="y")
+view_3 = tk.Text(frame_3,yscrollcommand=scroll_3.set, height=7)
+view_3.pack(pady=10)
+frame_3.pack()
+  
+root.mainloop()
