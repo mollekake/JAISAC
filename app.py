@@ -8,7 +8,7 @@ import time
 
 #Setting up tkinter
 root = tk.Tk()
-root.title('IMDb and JustWatch scraper')
+root.title('JAISAC')
 root.geometry("900x900")
 root.resizable(False, False)
 
