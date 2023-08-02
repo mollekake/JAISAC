@@ -1,5 +1,7 @@
 # JAISAC
 
+(Justwatch And Imdb Scraper And Comparator)
+
 A very basic and hacky way to get your personal IMDb watchlist, get all the titles, and check on JustWatch where you can stream said titles.
 
 Currently it only works with up to 200 titles.
